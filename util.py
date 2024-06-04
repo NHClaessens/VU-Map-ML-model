@@ -282,3 +282,40 @@ def filter_tuple(tup, remove_value=None):
     tuple: The filtered tuple with remove_value removed.
     """
     return tuple(x for x in tup if x is not remove_value)
+
+def triangulate(distances, ap_positions):
+    pred_x = 0
+    pred_y = 0
+    pred_z = 0
+
+    totalWeight = 0
+
+    for index, distance in enumerate(distances):
+        x = ap_positions[index][0][0]
+        y = ap_positions[index][1][0]
+        z = ap_positions[index][2][0]
+
+        weight = 1 / distance ** 2
+
+        pred_x += x * weight
+        pred_y += y * weight
+        pred_z += z * weight
+
+        totalWeight += weight
+    
+    trilateration = [pred_x / totalWeight, pred_y / totalWeight, pred_z / totalWeight]
+
+    return trilateration
+
+def get_ap_locations(df):
+    ap_names = df.filter(regex='^NU-AP\d{5}$')
+
+    locations = []
+    for name in ap_names:
+        locations.append([
+            df[name+'_x'][0],
+            df[name+'_y'][0],
+            df[name+'_z'][0],
+        ])
+    
+    return locations

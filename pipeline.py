@@ -1,6 +1,8 @@
 from datetime import datetime
 import pickle
-from util import load_files, filter_columns, evaluate_model, split_data, split_data_parts
+
+from sklearn.discriminant_analysis import StandardScaler
+from util import get_ap_locations, load_files, filter_columns, evaluate_model, split_data, split_data_parts, triangulate
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 from sklearn.pipeline import FunctionTransformer, Pipeline, FeatureUnion
@@ -24,39 +26,45 @@ class PipeLineModel(BaseEstimator, TransformerMixin):
         return self.model.predict(X)
     
 class SplitPipeline(Pipeline):
-    def __init__(self, steps, parts, **kwargs):
+    def __init__(self, steps, start, targets, type='normal', **kwargs):
         super().__init__(steps, **kwargs)
 
-        self.parts = parts
+        self.start = start
+        self.targets = targets
+        self.type = type
 
 
     def fit(self, X, y):
-        parts = split_data_parts(X, self.parts)
-
+        parts = split_data_parts(X, [self.start, *self.targets])
         X = parts[0]
+        targets = parts[1:]
 
         for (index, step) in enumerate(self.steps[:-1]):
             name, model = step
 
-            model.fit(X, parts[index + 1])
+            model.fit(X, targets[index])
 
             if index < len(self.steps) - 1:
-                X = np.hstack((X, model.transform(X)))
+                if self.type == 'cumulative':
+                    X = np.hstack((X, model.transform(X)))
+                if self.type == 'normal':
+                    X = model.transform(X)
         
         self.steps[-1][1].fit(X, y)
         
         return self
     
     def predict(self, X):
-        parts = split_data_parts(X, self.parts)
-        X = parts[0]
-
+        X = split_data_parts(X, [self.start])[0]
 
         for (index, step) in enumerate(self.steps):
             name, model = step
 
             if index < len(self.steps) - 1:
-                X = np.hstack((X, model.transform(X)))
+                if self.type == 'cumulative':
+                    X = np.hstack((X, model.transform(X)))
+                if self.type == 'normal':
+                    X = model.transform(X)
             else:
                 return model.predict(X)
             
@@ -64,7 +72,22 @@ class SplitPipeline(Pipeline):
         pred = self.predict(X)
         return -np.mean((y - pred) ** 2)
 
-            
+class TriangulationTransformer(BaseEstimator, TransformerMixin):
+    def __init__(self, ap_positions):
+        self.ap_positions = np.array(ap_positions)  # Known positions of APs
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        return np.apply_along_axis(self.triangulate, 1, X)
+    
+    def predict(self, X):
+        return self.transform(X)
+    
+    def triangulate(self, distances):
+        return triangulate(distances, self.ap_positions)
+
 
 def main():
     df = load_files(["samplesF5-multilayer.csv", "samplesF6-multilayer.csv"])
@@ -72,11 +95,14 @@ def main():
     X_train, X_test, y_train, y_test = split_data(df, test_size=0.5, random_state=0)
 
     # predict_location(X_train, X_test, y_train, y_test)
+    # distance_triangulation(X_train, X_test, y_train, y_test)
     distance_to_location(X_train, X_test, y_train, y_test)
 
 
-
 def predict_location(X_train, X_test, y_train, y_test):
+    """
+    1. RSSI to location with RFR
+    """
     model = RandomForestRegressor(
         n_estimators=175, #175 1870
         max_depth=120, #120 None
@@ -98,21 +124,15 @@ def predict_location(X_train, X_test, y_train, y_test):
 
     handle_pipeline(pipeline, "Direct location prediction", X_train, X_test, y_train, y_test, search_grid=search_grid)
     
-def distance_to_location(X_train, X_test, y_train, y_test):
+def distance_triangulation(X_train, X_test, y_train, y_test):
+    """
+    1. RSSI to distance with RFR
+    2. Distance to location with triangulation
+    """
     distance_model = RandomForestRegressor(
-        n_estimators=1500, #175 1870
-        max_depth=None, #120 None
-        min_samples_split=2, #4 2
-        min_samples_leaf=1,
-        bootstrap=False,
-        max_features="sqrt",
-        random_state=42
-    )
-
-    location_model = RandomForestRegressor(
-        n_estimators=500, #175 1870
-        max_depth=None, #120 None
-        min_samples_split=2, #4 2
+        n_estimators=1500, #1500
+        max_depth=None,
+        min_samples_split=2,
         min_samples_leaf=1,
         bootstrap=False,
         max_features="sqrt",
@@ -129,12 +149,67 @@ def distance_to_location(X_train, X_test, y_train, y_test):
     }
 
     pipeline = SplitPipeline([
-        ('distance', PipeLineModel(distance_model)),
-        ('location', location_model)
-    ], [['^NU-AP\d{5}$'], ['^NU-AP\d{5}_distance$']])
+            ('distance', PipeLineModel(distance_model)),
+            ('location', TriangulationTransformer(get_ap_locations(X_train)))
+        ],
+        start=['^NU-AP\d{5}$'],
+        targets=[['^NU-AP\d{5}_distance$']], 
+    )
+
+    handle_pipeline(pipeline, "Distance-to-triangulation", X_train, X_test, y_train, y_test, search_grid=search_grid)
+
+def distance_to_location(X_train, X_test, y_train, y_test):
+    """
+    1. RSSI to distance with RFR
+    2. Distance to location with RFR
+    """
+    distance_model = RandomForestRegressor(
+        n_estimators=1500, #1500
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        bootstrap=False,
+        max_features="sqrt",
+        random_state=42
+    )
+
+    location_model = RandomForestRegressor(
+        n_estimators=500, #500
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        bootstrap=False,
+        max_features="sqrt",
+        random_state=42
+    )
+
+    search_grid = {
+        'distance__model__n_estimators': [100, 1500, 2000],
+        'distance__model__min_samples_split': [2],
+        'distance__model__min_samples_leaf': [1],
+        'location__n_estimators': [100, 500, 1500],
+        'location__min_samples_split': [2],
+        'location__min_samples_leaf': [1],
+    }
+
+    pipeline = SplitPipeline([
+            ('distance', PipeLineModel(distance_model)),
+            ('location', location_model)
+        ],
+        start=['^NU-AP\d{5}$'],
+        targets=[['^NU-AP\d{5}_distance$'], []], 
+        type='cumulative'
+    )
 
 
     handle_pipeline(pipeline, "Distance-to-location", X_train, X_test, y_train, y_test, search_grid=search_grid)
+
+
+
+
+
+
+
 
 def handle_pipeline(pipeline, name, X_train, X_test, y_train, y_test, search_grid):
 
@@ -155,9 +230,6 @@ def handle_pipeline(pipeline, name, X_train, X_test, y_train, y_test, search_gri
         fitted_model = pipeline.fit(X_train, y_train)
 
         predictions = fitted_model.predict(X_test)
-
-        if type(y_test) is list:
-            y_test = y_test[-1]
 
         evaluate_model(y_test, predictions, name)
 
