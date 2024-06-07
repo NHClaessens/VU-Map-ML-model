@@ -99,15 +99,16 @@ def filter_columns(df, regex_patterns, return_removed = False):
         return df.filter(items=columns_to_keep)
 
 
-def evaluate_model(y_test, y_pred, name):
+def evaluate_model(y_test, y_pred, name, location=False):
     r2 = r2_score(y_test, y_pred)
     mse = mean_squared_error(y_test, y_pred)
     mae = mean_absolute_error(y_test, y_pred)
     mdae = median_absolute_error(y_test, y_pred)
     print_results((r2, mse, mae, mdae), name)
-    average = analyze_predictions(y_test, y_pred)
+
+    if(location):
+        analyze_predictions(y_test, y_pred)
     print("--------------------------------------------------")
-    return average
 
 
 def print_results(eval_tuple, model_name):
@@ -291,9 +292,9 @@ def triangulate(distances, ap_positions):
     totalWeight = 0
 
     for index, distance in enumerate(distances):
-        x = ap_positions[index][0][0]
-        y = ap_positions[index][1][0]
-        z = ap_positions[index][2][0]
+        x = ap_positions[index][0]
+        y = ap_positions[index][1]
+        z = ap_positions[index][2]
 
         weight = 1 / distance ** 2
 
@@ -304,18 +305,18 @@ def triangulate(distances, ap_positions):
         totalWeight += weight
     
     trilateration = [pred_x / totalWeight, pred_y / totalWeight, pred_z / totalWeight]
-
     return trilateration
 
 def get_ap_locations(df):
     ap_names = df.filter(regex='^NU-AP\d{5}$')
 
+
     locations = []
     for name in ap_names:
         locations.append([
-            df[name+'_x'][0],
-            df[name+'_y'][0],
-            df[name+'_z'][0],
+            df[name+'_x'].iloc[0],
+            df[name+'_y'].iloc[0],
+            df[name+'_z'].iloc[0],
         ])
     
     return locations
