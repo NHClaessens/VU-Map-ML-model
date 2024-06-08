@@ -92,11 +92,16 @@ def filter_columns(df, regex_patterns, return_removed = False):
     columns_to_keep = list(set(columns_to_keep))
     columns_to_remove = list(set(columns_to_remove))
 
+    keep = df.filter(items=columns_to_keep)
+    keep.sort_index(axis=1, inplace=True)
+
     # Use .filter() to keep only the specified columns
     if return_removed:
-        return (df.filter(items=columns_to_keep).sort_index(axis=1, inplace=True), df.filter(items=columns_to_remove).sort_index(axis=1, inplace=True))
+        remove = df.filter(items=columns_to_remove)
+        remove.sort_index(axis=1, inplace=True)
+        return keep, remove
     else:
-        return df.filter(items=columns_to_keep)
+        return keep
 
 
 def evaluate_model(y_test, y_pred, name, location=False):
@@ -122,15 +127,26 @@ def analyze_predictions(actual, predicted):
     worst = 0
     average = 0
 
-    for (index, item) in enumerate(predicted):
-        current = actual.iloc[index]
-        current_scaled = [current.x * X_MAX, current.y * Y_MAX, current.z * Z_MAX]
-        item_scaled = [item[0] * X_MAX, item[1] * Y_MAX, item[2] * Z_MAX]
+    if isinstance(predicted, pd.DataFrame):
+        for index, item in predicted.iterrows():
+            current = actual.iloc[index]
+            current_scaled = [current.x * X_MAX, current.y * Y_MAX, current.z * Z_MAX]
+            item_scaled = [item.x * X_MAX, item.y * Y_MAX, item.z * Z_MAX]
 
-        distance = math.dist(current_scaled, item_scaled)
-        average += distance
-        if distance > worst:
-            worst = distance
+            distance = math.dist(current_scaled, item_scaled)
+            average += distance
+            if distance > worst:
+                worst = distance
+    else:
+        for (index, item) in enumerate(predicted):
+            current = actual.iloc[index]
+            current_scaled = [current.x * X_MAX, current.y * Y_MAX, current.z * Z_MAX]
+            item_scaled = [item[0] * X_MAX, item[1] * Y_MAX, item[2] * Z_MAX]
+
+            distance = math.dist(current_scaled, item_scaled)
+            average += distance
+            if distance > worst:
+                worst = distance
     
     average /= len(predicted)
     
@@ -307,7 +323,7 @@ def triangulate(distances, ap_positions):
     trilateration = [pred_x / totalWeight, pred_y / totalWeight, pred_z / totalWeight]
     return trilateration
 
-def get_ap_locations(df):
+def get_ap_locations_names(df):
     ap_names = df.filter(regex='^NU-AP\d{5}$')
 
 
@@ -319,4 +335,4 @@ def get_ap_locations(df):
             df[name+'_z'].iloc[0],
         ])
     
-    return locations
+    return locations, list(ap_names.columns)

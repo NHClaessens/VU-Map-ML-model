@@ -3,7 +3,7 @@ import json
 import pickle
 
 from sklearn.discriminant_analysis import StandardScaler
-from util import get_ap_locations, load_files, filter_columns, evaluate_model, split_data, split_data_parts, triangulate
+from util import get_ap_locations_names, load_files, filter_columns, evaluate_model, split_data, split_data_parts, triangulate
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 from sklearn.pipeline import FunctionTransformer, Pipeline, FeatureUnion
@@ -29,6 +29,7 @@ if(SOCKET):
             unity = conn
 
 ap_positions = None
+ap_names = None
 
 class PipeLineModel(BaseEstimator, TransformerMixin):
     def __init__(self, model):
@@ -38,76 +39,92 @@ class PipeLineModel(BaseEstimator, TransformerMixin):
         self.model.fit(X, y)
         return self
 
-    def transform(self, X):
-        return self.model.predict(X)
+    def transform(self, X, y):
+        predictions =  self.model.predict(X)
+        return pd.DataFrame(predictions, columns=y.columns)
     
 class SplitPipeline(Pipeline):
-    def __init__(self, steps, start, targets, type='normal', **kwargs):
+    def __init__(self, steps, inputs, targets, remove = [], type='normal', **kwargs):
         super().__init__(steps, **kwargs)
 
-        self.start = start
         self.targets = targets
         self.type = type
-
+        self.inputs = inputs
+        self.remove = remove
 
     def fit(self, X, y):
-        parts = split_data_parts(X, [self.start, *self.targets])
-        X = parts[0]
-        targets = parts[1:]
+        targets = split_data_parts(X, self.targets)
+        _, X = filter_columns(X, self.remove, return_removed=True)
 
         for (index, step) in enumerate(self.steps[:-1]):
             name, model = step
 
-            model.fit(X, targets[index])
+            input = split_data_parts(X, [self.inputs[index]])[0] if self.inputs[index] else X
+
+            model.fit(input, targets[index])
 
             if index < len(self.steps) - 1:
                 if self.type == 'cumulative':
-                    X = np.hstack((X, model.transform(X)))
+                    transformed = model.transform(input, targets[index])
+                    transformed.index = X.index
+                    X = pd.concat([X, transformed], axis=1)
                 if self.type == 'normal':
-                    X = model.transform(X)
-            
-        self.steps[-1][1].fit(X, y)
+                    X = model.transform(input, targets[index])
+
+        input = split_data_parts(X, [self.inputs[-1]])[0] if self.inputs[-1] else X
+
+        self.steps[-1][1].fit(input, y)
         
         return self
     
     def predict(self, X):
-        X = split_data_parts(X, [self.start])[0]
+        targets = split_data_parts(X, self.targets)
+        _, X = filter_columns(X, self.remove, return_removed=True)
 
         for (index, step) in enumerate(self.steps):
             name, model = step
 
+            input = split_data_parts(X, [self.inputs[index]])[0] if self.inputs[index] else X
+
             if index < len(self.steps) - 1:
                 if self.type == 'cumulative':
-                    X = np.hstack((X, model.transform(X)))
+                    transformed = model.transform(input, targets[index])
+                    transformed.index = X.index
+                    X = pd.concat([X, transformed], axis=1)
                 if self.type == 'normal':
-                    X = model.transform(X)
+                    X = model.transform(input, targets[index])
             else:
-                return model.predict(X)
+                return model.predict(input)
             
     def score(self, X, y):
         pred = self.predict(X)
         return -np.mean((y - pred) ** 2)
     
     def evaluate(self, X, y):
-        parts = split_data_parts(X, [self.start, *self.targets])
-        X = parts[0]
-        targets = parts[1:]
+        targets = split_data_parts(X, self.targets)
+        _, X = filter_columns(X, self.remove, return_removed=True)
+
 
         for (index, step) in enumerate(self.steps):
             name, model = step
 
-            if index < len(self.steps) - 1:
-                predictions = model.transform(X)
+            input = split_data_parts(X, [self.inputs[index]])[0] if self.inputs[index] else X
 
-                evaluate_model(targets[index], predictions, f'Layer {index + 1}: {name}')
+            if index < len(self.steps) - 1:
+                predictions = model.transform(input, targets[index])
+
+                if(isinstance(model, PipeLineModel)):
+                    evaluate_model(targets[index], predictions, f'Layer {index + 1}: {name}')
 
                 if self.type == 'cumulative':
-                    X = np.hstack((X, predictions))
+                    transformed = model.transform(input, targets[index])
+                    transformed.index = X.index
+                    X = pd.concat([X, transformed], axis=1)
                 if self.type == 'normal':
                     X = predictions
             else:
-                predictions = model.predict(X)
-                evaluate_model(y, predictions, f'{index}: {name}', location=True)
+                predictions = model.predict(input)
+                evaluate_model(y, predictions, f'Layer {index + 1}: {name}', location=True)
 
                 return predictions
 
@@ -115,15 +132,20 @@ class TriangulationTransformer(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         return self
 
-    def transform(self, X):
-        res =  np.apply_along_axis(self.triangulate, 1, X)
+    def transform(self, X, y=None):
+        res = X.apply(self.triangulate, axis=1)
         return res
     
     def predict(self, X):
         return self.transform(X)
     
     def triangulate(self, distances):
-        return triangulate(distances, ap_positions)
+        loc =  triangulate(distances, ap_positions)
+        return pd.Series({
+            'x': loc[0],
+            'y': loc[1],
+            'z': loc[2],
+        })
 
 class ObstacleTransfomer(BaseEstimator, TransformerMixin):
     def __init__(self) -> None:
@@ -138,8 +160,8 @@ class ObstacleTransfomer(BaseEstimator, TransformerMixin):
     def predict(self, X):
         return self.transform(X)
     
-    def transform(self, X):
-        res =  np.apply_along_axis(self.get_obstacles, 1, X)
+    def transform(self, X, y):
+        res =  X.apply(self.get_obstacles, axis=1)
         return res
 
 
@@ -147,9 +169,9 @@ class ObstacleTransfomer(BaseEstimator, TransformerMixin):
         unity.sendall(json.dumps({
             "type": "obstacles",
             "data": {
-                "x": pos[0],
-                "y": pos[1],
-                "z": pos[2],
+                "x": pos.x,
+                "y": pos.y,
+                "z": pos.z,
             }
         }).encode())
         
@@ -157,21 +179,33 @@ class ObstacleTransfomer(BaseEstimator, TransformerMixin):
 
         data = json.loads(data)
         obstacles = json.loads(data['data']['obstacle_thickness'])
-        return obstacles
+
+        d = {}
+
+        for (index, dist) in enumerate(obstacles):
+            d[ap_names[index]+'_obstacle_thickness'] = dist
+
+        return pd.Series(d)
 
 def main():
     df = load_files(["samplesF5-multilayer.csv", "samplesF6-multilayer.csv"])
 
     X_train, X_test, y_train, y_test = split_data(df, test_size=0.5, random_state=0)
 
+    # X_train = X_train[0:10]
+    # X_test = X_test[0:10]
+    # y_train = y_train[0:10]
+    # y_test = y_test[0:10]
+
     global ap_positions
-    ap_positions = get_ap_locations(X_train)
+    global ap_names
+    ap_positions, ap_names = get_ap_locations_names(X_train)
 
     # The models should not get to take in location as training data
-    # predict_location(X_train, X_test, y_train, y_test)
-    # distance_triangulation(X_train, X_test, y_train, y_test)
+    predict_location(X_train, X_test, y_train, y_test)
+    distance_triangulation(X_train, X_test, y_train, y_test)
     distance_to_location(X_train, X_test, y_train, y_test)
-    # distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
+    distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
 
 
 def predict_location(X_train, X_test, y_train, y_test):
@@ -196,8 +230,9 @@ def predict_location(X_train, X_test, y_train, y_test):
     pipeline = SplitPipeline([
             ('location', model)
         ],
-        start=['^NU-AP\d{5}$'],
-        targets=[]
+        inputs=[['^NU-AP\d{5}$']],
+        targets=[],
+        remove=['^NU-AP\d{5}_distance$']
     )
 
     handle_pipeline(pipeline, "Direct location prediction", X_train, X_test, y_train, y_test, search_grid=search_grid)
@@ -230,8 +265,9 @@ def distance_triangulation(X_train, X_test, y_train, y_test):
             ('distance', PipeLineModel(distance_model)),
             ('location', TriangulationTransformer())
         ],
-        start=['^NU-AP\d{5}$'],
+        inputs=[['^NU-AP\d{5}$'], []],
         targets=[['^NU-AP\d{5}_distance$']], 
+        remove=['^NU-AP\d{5}_distance$']
     )
 
     handle_pipeline(pipeline, "Distance-to-triangulation", X_train, X_test, y_train, y_test, search_grid=search_grid)
@@ -274,9 +310,10 @@ def distance_to_location(X_train, X_test, y_train, y_test):
             ('distance', PipeLineModel(distance_model)),
             ('location', location_model)
         ],
-        start=['^NU-AP\d{5}$'],
+        inputs=[['^NU-AP\d{5}$'], []],
         targets=[['^NU-AP\d{5}_distance$'], []], 
-        type='cumulative'
+        type='cumulative',
+        remove=['^NU-AP\d{5}_distance$']
     )
 
 
@@ -324,8 +361,10 @@ def distance_triangulation_obstacle(X_train, X_test, y_train, y_test):
             ('get_obstacles', ObstacleTransfomer()),
             ('location', location_model)
         ],
-        start=['^NU-AP\d{5}$'],
+        inputs=[['^NU-AP\d{5}$'], ['^NU-AP\d{5}_distance$'], ['^(x|y|z)$'], []],
         targets=[['^NU-AP\d{5}_distance$'], [], []], 
+        type='cumulative',
+        remove=['^NU-AP\d{5}_distance$']
     )
 
     handle_pipeline(pipeline, "Distance-to-triangulation-to-obstacle", X_train, X_test, y_train, y_test, search_grid=search_grid)
@@ -353,11 +392,9 @@ def handle_pipeline(pipeline, name, X_train, X_test, y_train, y_test, search_gri
     else:
         fitted_model = pipeline.fit(X_train, y_train)
 
-        # predictions = fitted_model.predict(X_test)
-
-        # evaluate_model(y_test, predictions, name)
-
         fitted_model.evaluate(X_test, y_test)
+
+        predictions = fitted_model.predict(X_test)
 
         if(SAVE_MODEL):
             now = datetime.now().strftime('%m-%d--%H-%M-%S')
