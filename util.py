@@ -1,10 +1,12 @@
 import re
+import numpy as np
 import pandas as pd
 import sys
 from sklearn.metrics import mean_absolute_error, mean_squared_error, median_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 import math
 from datetime import datetime
+from scipy.stats import norm
 
 
 RSSI_MIN = -100
@@ -29,6 +31,15 @@ def preprocess(df):
 
     df.dropna(how='all', axis=1, inplace=True)
     df.dropna(inplace=True)
+
+    # cols_to_remove = df.columns[(df == 1).all()]
+    # df = df.drop(columns=cols_to_remove)
+
+    # print("Before filter", len(df))
+
+    # df = apply_gaussian_filter(df, 0.0001)
+
+    # print("After filter", len(df))
 
     df = scale_rssi(df)
     df = scale_xyz(df)
@@ -64,6 +75,37 @@ def scale_xyz(df):
         elif "z" == column or "_z" in column:
             df[column] = df[column].apply(lambda x: x / Z_MAX)
     return df
+
+def apply_gaussian_filter(df, threshold_probability):
+    # Get the list of AP columns
+    ap_columns = df.columns[df.columns.str.contains(r'^NU-AP\d{5}$')].tolist()
+    
+    filtered_rows = []
+    
+    # Group by x, y, z
+    grouped = df.groupby(['x', 'y', 'z'])
+    
+    for (x, y, z), group in grouped:
+        filtered_group = group.copy()
+        cumulative_mask = np.ones(len(group), dtype=bool)
+        
+        for col in ap_columns:
+            rssi_mean = group[col].mean()
+            rssi_std = group[col].std()
+            
+            if rssi_std == 0:
+                # Avoid division by zero
+                continue
+            
+            # Calculate the probability for each RSSI value
+            probabilities = norm.pdf(group[col], rssi_mean, rssi_std)
+
+            cumulative_mask &= (probabilities >= threshold_probability)
+        
+        filtered_group = group[cumulative_mask]
+        filtered_rows.append(filtered_group)
+    
+    return pd.concat(filtered_rows, ignore_index=True)
 
 def filter_columns(df, regex_patterns, return_removed = False):
     """

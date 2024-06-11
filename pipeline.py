@@ -168,6 +168,7 @@ class ObstacleTransfomer(BaseEstimator, TransformerMixin):
     def get_obstacles(self, pos):
         unity.sendall(json.dumps({
             "type": "obstacles",
+            # "ap_names": ap_names,
             "data": {
                 "x": pos.x,
                 "y": pos.y,
@@ -203,9 +204,9 @@ def main():
 
     # The models should not get to take in location as training data
     predict_location(X_train, X_test, y_train, y_test)
-    distance_triangulation(X_train, X_test, y_train, y_test)
-    distance_to_location(X_train, X_test, y_train, y_test)
-    distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
+    # distance_triangulation(X_train, X_test, y_train, y_test)
+    # distance_to_location(X_train, X_test, y_train, y_test)
+    # distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
 
 
 def predict_location(X_train, X_test, y_train, y_test):
