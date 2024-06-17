@@ -32,6 +32,8 @@ def preprocess(df):
     df.dropna(how='all', axis=1, inplace=True)
     df.dropna(inplace=True)
 
+    df = remove_columns(df, [r'^NU-AP\d{5}_obstacle_count$', r'^NU-AP\d{5}_obstacle_thickness$'])
+
     # cols_to_remove = df.columns[(df == 1).all()]
     # df = df.drop(columns=cols_to_remove)
 

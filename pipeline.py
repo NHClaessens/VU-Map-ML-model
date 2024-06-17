@@ -189,7 +189,8 @@ class ObstacleTransfomer(BaseEstimator, TransformerMixin):
         return pd.Series(d)
 
 def main():
-    df = load_files(["samplesF5-multilayer.csv", "samplesF6-multilayer.csv"])
+    # df = load_files(["samplesF5-multilayer.csv", "samplesF6-multilayer.csv"])
+    df = load_files(["samples F5-ENRICHED.csv", "samples F6-ENRICHED.csv"])
 
     X_train, X_test, y_train, y_test = split_data(df, test_size=0.5, random_state=0)
 
@@ -200,13 +201,13 @@ def main():
 
     global ap_positions
     global ap_names
-    ap_positions, ap_names = get_ap_locations_names(X_train)
+    # ap_positions, ap_names = get_ap_locations_names(X_train)
 
     # The models should not get to take in location as training data
     predict_location(X_train, X_test, y_train, y_test)
-    distance_triangulation(X_train, X_test, y_train, y_test)
+    # distance_triangulation(X_train, X_test, y_train, y_test)
     distance_to_location(X_train, X_test, y_train, y_test)
-    distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
+    # distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
 
 
 def predict_location(X_train, X_test, y_train, y_test):
@@ -231,7 +232,8 @@ def predict_location(X_train, X_test, y_train, y_test):
     pipeline = SplitPipeline([
             ('location', model)
         ],
-        inputs=[['^NU-AP\d{5}$']],
+        inputs=[[]],
+        # inputs=[['^NU-AP\d{5}$']],
         targets=[],
         remove=['^NU-AP\d{5}_distance$']
     )
@@ -266,7 +268,8 @@ def distance_triangulation(X_train, X_test, y_train, y_test):
             ('distance', PipeLineModel(distance_model)),
             ('location', TriangulationTransformer())
         ],
-        inputs=[['^NU-AP\d{5}$'], []],
+        inputs=[[], []],
+        # inputs=[['^NU-AP\d{5}$'], []],
         targets=[['^NU-AP\d{5}_distance$']], 
         remove=['^NU-AP\d{5}_distance$']
     )
@@ -311,7 +314,8 @@ def distance_to_location(X_train, X_test, y_train, y_test):
             ('distance', PipeLineModel(distance_model)),
             ('location', location_model)
         ],
-        inputs=[['^NU-AP\d{5}$'], []],
+        inputs=[[], []],
+        # inputs=[['^NU-AP\d{5}$'], []],
         targets=[['^NU-AP\d{5}_distance$'], []], 
         type='cumulative',
         remove=['^NU-AP\d{5}_distance$']
@@ -368,8 +372,7 @@ def distance_triangulation_obstacle(X_train, X_test, y_train, y_test):
         remove=['^NU-AP\d{5}_distance$']
     )
 
-    handle_pipeline(pipeline, "Distance-to-triangulation-to-obstacle", X_train, X_test, y_train, y_test, search_grid=search_grid)
-
+    handle_pipeline(pipeline, "Distance-to-triangulation-to-obstacle", X_train, X_test, y_train, y_test, search_grid=search_grid) 
 
 
 
