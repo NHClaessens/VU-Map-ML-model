@@ -204,9 +204,9 @@ def main():
 
     # The models should not get to take in location as training data
     predict_location(X_train, X_test, y_train, y_test)
-    # distance_triangulation(X_train, X_test, y_train, y_test)
-    # distance_to_location(X_train, X_test, y_train, y_test)
-    # distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
+    distance_triangulation(X_train, X_test, y_train, y_test)
+    distance_to_location(X_train, X_test, y_train, y_test)
+    distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
 
 
 def predict_location(X_train, X_test, y_train, y_test):
@@ -279,7 +279,7 @@ def distance_to_location(X_train, X_test, y_train, y_test):
     2. Distance to location with RFR
     """
     distance_model = RandomForestRegressor(
-        n_estimators=1, #1500
+        n_estimators=1500, #1500
         max_depth=None,
         min_samples_split=2,
         min_samples_leaf=1,
@@ -289,7 +289,7 @@ def distance_to_location(X_train, X_test, y_train, y_test):
     )
 
     location_model = RandomForestRegressor(
-        n_estimators=1, #500
+        n_estimators=1500, #500
         max_depth=None,
         min_samples_split=2,
         min_samples_leaf=1,
