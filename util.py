@@ -32,7 +32,11 @@ def preprocess(df):
     df.dropna(how='all', axis=1, inplace=True)
     df.dropna(inplace=True)
 
-    df = remove_columns(df, [r'^NU-AP\d{5}_obstacle_count$', r'^NU-AP\d{5}_obstacle_thickness$'])
+    # df = remove_columns(df, [
+    #     r'^NU-AP\d{5}_obstacle_present$',
+    #     r'^NU-AP\d{5}_obstacle_count$', 
+    #     r'^NU-AP\d{5}_obstacle_thickness$',
+    # ])
 
     # cols_to_remove = df.columns[(df == 1).all()]
     # df = df.drop(columns=cols_to_remove)
@@ -76,6 +80,16 @@ def scale_xyz(df):
             df[column] = df[column].apply(lambda x: x / Y_MAX)
         elif "z" == column or "_z" in column:
             df[column] = df[column].apply(lambda x: x / Z_MAX)
+    return df
+
+def unscale_xyz(df):
+    for column in df.columns:
+        if "x" == column or "_x" in column:
+            df[column] = df[column].apply(lambda x: x * X_MAX)
+        elif "y" == column or "_y" in column:
+            df[column] = df[column].apply(lambda x: x * Y_MAX)
+        elif "z" == column or "_z" in column:
+            df[column] = df[column].apply(lambda x: x * Z_MAX)
     return df
 
 def apply_gaussian_filter(df, threshold_probability):

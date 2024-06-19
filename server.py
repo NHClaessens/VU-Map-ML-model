@@ -71,14 +71,26 @@ def get_options():
             'title': 'random',
             'endpoint': 'predict/random'
         },
+        {
+            'title': 'static',
+            'endpoint': 'predict/static'
+        },
     ])
 
 @app.route('/predict/random', methods=['POST'])
-def test():
+def predict_random():
     return jsonify({
         'x': random.uniform(2, 68), 
         'y': random.uniform(0, 24.6), 
         'z': random.uniform(2, 68)
+    })
+
+@app.route('/predict/static', methods=['POST'])
+def predict_static():
+    return jsonify({
+        'x': 44, 
+        'y': 21, 
+        'z': 44
     })
 
 

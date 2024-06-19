@@ -3,7 +3,7 @@ import json
 import pickle
 
 from sklearn.discriminant_analysis import StandardScaler
-from util import get_ap_locations_names, load_files, filter_columns, evaluate_model, split_data, split_data_parts, triangulate
+from util import get_ap_locations_names, load_files, filter_columns, evaluate_model, split_data, split_data_parts, triangulate, unscale_xyz
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 from sklearn.pipeline import FunctionTransformer, Pipeline, FeatureUnion
@@ -14,7 +14,9 @@ import pandas as pd
 
 HYPERPARAM_SEARCH = '--hyper-search' in sys.argv
 SAVE_MODEL = '--save' in sys.argv
+EXPORT = '--export' in sys.argv
 SOCKET = '--socket' in sys.argv
+NON_PROD = False
 
 unity = None
 
@@ -190,7 +192,8 @@ class ObstacleTransfomer(BaseEstimator, TransformerMixin):
 
 def main():
     # df = load_files(["samplesF5-multilayer.csv", "samplesF6-multilayer.csv"])
-    df = load_files(["samples F5-ENRICHED.csv", "samples F6-ENRICHED.csv"])
+    # df = load_files(["samples F5-ENRICHED.csv", "samples F6-ENRICHED.csv"])
+    df = load_files(["samples F5 everything.csv", "samples F6 everything.csv"])
 
     X_train, X_test, y_train, y_test = split_data(df, test_size=0.5, random_state=0)
 
@@ -201,12 +204,12 @@ def main():
 
     global ap_positions
     global ap_names
-    # ap_positions, ap_names = get_ap_locations_names(X_train)
+    ap_positions, ap_names = get_ap_locations_names(X_train)
 
     # The models should not get to take in location as training data
     predict_location(X_train, X_test, y_train, y_test)
     # distance_triangulation(X_train, X_test, y_train, y_test)
-    distance_to_location(X_train, X_test, y_train, y_test)
+    # distance_to_location(X_train, X_test, y_train, y_test)
     # distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
 
 
@@ -232,8 +235,7 @@ def predict_location(X_train, X_test, y_train, y_test):
     pipeline = SplitPipeline([
             ('location', model)
         ],
-        inputs=[[]],
-        # inputs=[['^NU-AP\d{5}$']],
+        inputs=[[]] if NON_PROD else [['^NU-AP\d{5}$']],
         targets=[],
         remove=['^NU-AP\d{5}_distance$']
     )
@@ -268,8 +270,7 @@ def distance_triangulation(X_train, X_test, y_train, y_test):
             ('distance', PipeLineModel(distance_model)),
             ('location', TriangulationTransformer())
         ],
-        inputs=[[], []],
-        # inputs=[['^NU-AP\d{5}$'], []],
+        inputs=[[], []] if NON_PROD else [['^NU-AP\d{5}$'], []],
         targets=[['^NU-AP\d{5}_distance$']], 
         remove=['^NU-AP\d{5}_distance$']
     )
@@ -314,8 +315,7 @@ def distance_to_location(X_train, X_test, y_train, y_test):
             ('distance', PipeLineModel(distance_model)),
             ('location', location_model)
         ],
-        inputs=[[], []],
-        # inputs=[['^NU-AP\d{5}$'], []],
+        inputs=[[], []] if NON_PROD else [['^NU-AP\d{5}$'], []],
         targets=[['^NU-AP\d{5}_distance$'], []], 
         type='cumulative',
         remove=['^NU-AP\d{5}_distance$']
@@ -399,6 +399,16 @@ def handle_pipeline(pipeline, name, X_train, X_test, y_train, y_test, search_gri
         fitted_model.evaluate(X_test, y_test)
 
         predictions = fitted_model.predict(X_test)
+
+        if(EXPORT):
+            now = datetime.now().strftime('%m-%d--%H-%M-%S')
+
+            predictions = pd.DataFrame(predictions, columns=['pred_x', 'pred_y', 'pred_z'], index=y_test.index)
+
+            export = pd.concat([y_test, predictions], axis=1)
+            export = unscale_xyz(export)
+
+            export.to_csv(f"results/{name}-{now}.csv", index=False)
 
         if(SAVE_MODEL):
             now = datetime.now().strftime('%m-%d--%H-%M-%S')
