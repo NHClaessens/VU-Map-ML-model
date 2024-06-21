@@ -1,9 +1,11 @@
 from datetime import datetime
 import json
 import pickle
+import time
+import winsound
 
 from sklearn.discriminant_analysis import StandardScaler
-from util import get_ap_locations_names, load_files, filter_columns, evaluate_model, split_data, split_data_parts, triangulate, unscale_xyz
+from util import X_MAX, Y_MAX, Z_MAX, get_ap_locations_names, least_squares_trilaterate, load_files, filter_columns, evaluate_model, split_data, split_data_parts, trilaterate, unscale_xyz
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin
 from sklearn.pipeline import FunctionTransformer, Pipeline, FeatureUnion
@@ -16,9 +18,13 @@ HYPERPARAM_SEARCH = '--hyper-search' in sys.argv
 SAVE_MODEL = '--save' in sys.argv
 EXPORT = '--export' in sys.argv
 SOCKET = '--socket' in sys.argv
+TIME = '--time' in sys.argv
+
 NON_PROD = False
+NAME_ADDITION = ''
 
 unity = None
+timer = None
 
 if(SOCKET):
     import socket
@@ -99,7 +105,13 @@ class SplitPipeline(Pipeline):
                 return model.predict(input)
             
     def score(self, X, y):
+
         pred = self.predict(X)
+        if(type(pred) is pd.DataFrame):
+            pred = pred.to_numpy()
+        if(type(y) is pd.DataFrame):
+            y = y.to_numpy()
+
         return -np.mean((y - pred) ** 2)
     
     def evaluate(self, X, y):
@@ -130,19 +142,24 @@ class SplitPipeline(Pipeline):
 
                 return predictions
 
-class TriangulationTransformer(BaseEstimator, TransformerMixin):
+class TrilaterationTransformer(BaseEstimator, TransformerMixin):
+    def __init__(self, n_closest_points=324) -> None:
+        super().__init__()
+        self.n_closest_points = n_closest_points
+
     def fit(self, X, y=None):
         return self
 
     def transform(self, X, y=None):
-        res = X.apply(self.triangulate, axis=1)
+        res = X.apply(self.trilaterate, axis=1)
         return res
     
     def predict(self, X):
         return self.transform(X)
     
-    def triangulate(self, distances):
-        loc =  triangulate(distances, ap_positions)
+    def trilaterate(self, distances):
+        # loc =  trilaterate(distances, ap_positions)
+        loc =  least_squares_trilaterate(distances, ap_positions, self.n_closest_points)
         return pd.Series({
             'x': loc[0],
             'y': loc[1],
@@ -172,9 +189,9 @@ class ObstacleTransfomer(BaseEstimator, TransformerMixin):
             "type": "obstacles",
             # "ap_names": ap_names,
             "data": {
-                "x": pos.x,
-                "y": pos.y,
-                "z": pos.z,
+                "x": pos.x * X_MAX,
+                "y": pos.y * Y_MAX,
+                "z": pos.z * Z_MAX,
             }
         }).encode())
         
@@ -191,11 +208,11 @@ class ObstacleTransfomer(BaseEstimator, TransformerMixin):
         return pd.Series(d)
 
 def main():
-    # df = load_files(["samplesF5-multilayer.csv", "samplesF6-multilayer.csv"])
+    df = load_files(["samplesF5-multilayer.csv", "samplesF6-multilayer.csv"])
     # df = load_files(["samples F5-ENRICHED.csv", "samples F6-ENRICHED.csv"])
-    df = load_files(["samples F5 everything.csv", "samples F6 everything.csv"])
+    # df = load_files(["samples F5 everything.csv", "samples F6 everything.csv"])
 
-    X_train, X_test, y_train, y_test = split_data(df, test_size=0.5, random_state=0)
+    X_train, X_test, y_train, y_test = split_data(df, test_size=0.2, random_state=0)
 
     # X_train = X_train[0:10]
     # X_test = X_test[0:10]
@@ -207,10 +224,10 @@ def main():
     ap_positions, ap_names = get_ap_locations_names(X_train)
 
     # The models should not get to take in location as training data
-    predict_location(X_train, X_test, y_train, y_test)
-    # distance_triangulation(X_train, X_test, y_train, y_test)
+    # predict_location(X_train, X_test, y_train, y_test)
+    # distance_trilateration(X_train, X_test, y_train, y_test)
     # distance_to_location(X_train, X_test, y_train, y_test)
-    # distance_triangulation_obstacle(X_train, X_test, y_train, y_test)
+    distance_trilateration_obstacle(X_train, X_test, y_train, y_test)
 
 
 def predict_location(X_train, X_test, y_train, y_test):
@@ -242,10 +259,10 @@ def predict_location(X_train, X_test, y_train, y_test):
 
     handle_pipeline(pipeline, "Direct location prediction", X_train, X_test, y_train, y_test, search_grid=search_grid)
     
-def distance_triangulation(X_train, X_test, y_train, y_test):
+def distance_trilateration(X_train, X_test, y_train, y_test):
     """
     1. RSSI to distance with RFR
-    2. Distance to location with triangulation
+    2. Distance to location with trilateration
     """
     distance_model = RandomForestRegressor(
         n_estimators=1500, #1500
@@ -258,24 +275,22 @@ def distance_triangulation(X_train, X_test, y_train, y_test):
     )
 
     search_grid = {
-        'distance__model__n_estimators': [100, 1500, 2000],
-        'distance__model__min_samples_split': [2],
-        'distance__model__min_samples_leaf': [1],
-        'location__n_estimators': [100, 500, 1500],
-        'location__min_samples_split': [2],
-        'location__min_samples_leaf': [1],
+        # 'distance__model__n_estimators': [100, 1500, 2000],
+        # 'distance__model__min_samples_split': [2],
+        # 'distance__model__min_samples_leaf': [1],
+        'location__n_closest_points': [50, 100, 150, 200, 250, 300, 324],
     }
 
     pipeline = SplitPipeline([
             ('distance', PipeLineModel(distance_model)),
-            ('location', TriangulationTransformer())
+            ('location', TrilaterationTransformer(n_closest_points=324))
         ],
         inputs=[[], []] if NON_PROD else [['^NU-AP\d{5}$'], []],
         targets=[['^NU-AP\d{5}_distance$']], 
         remove=['^NU-AP\d{5}_distance$']
     )
 
-    handle_pipeline(pipeline, "Distance-to-triangulation", X_train, X_test, y_train, y_test, search_grid=search_grid)
+    handle_pipeline(pipeline, "Distance-to-trilateration", X_train, X_test, y_train, y_test, search_grid=search_grid)
 
 def distance_to_location(X_train, X_test, y_train, y_test):
     """
@@ -324,10 +339,10 @@ def distance_to_location(X_train, X_test, y_train, y_test):
 
     handle_pipeline(pipeline, "Distance-to-location", X_train, X_test, y_train, y_test, search_grid=search_grid)
 
-def distance_triangulation_obstacle(X_train, X_test, y_train, y_test):
+def distance_trilateration_obstacle(X_train, X_test, y_train, y_test):
     """
     1. RSSI to distance with RFR
-    2. Distance to location with triangulation
+    2. Distance to location with trilateration
     3. Collect obstacle data
     4. Refine location
     """
@@ -362,7 +377,7 @@ def distance_triangulation_obstacle(X_train, X_test, y_train, y_test):
 
     pipeline = SplitPipeline([
             ('distance', PipeLineModel(distance_model)),
-            ('triangulation', TriangulationTransformer()),
+            ('trilateration', TrilaterationTransformer()),
             ('get_obstacles', ObstacleTransfomer()),
             ('location', location_model)
         ],
@@ -372,7 +387,7 @@ def distance_triangulation_obstacle(X_train, X_test, y_train, y_test):
         remove=['^NU-AP\d{5}_distance$']
     )
 
-    handle_pipeline(pipeline, "Distance-to-triangulation-to-obstacle", X_train, X_test, y_train, y_test, search_grid=search_grid) 
+    handle_pipeline(pipeline, "Distance-to-trilateration-to-obstacle", X_train, X_test, y_train, y_test, search_grid=search_grid) 
 
 
 
@@ -394,26 +409,43 @@ def handle_pipeline(pipeline, name, X_train, X_test, y_train, y_test, search_gri
         test_score = best_model.score(X_test, y_test)
         print("Test set score: ", test_score)
     else:
+        start = time.time()
+
         fitted_model = pipeline.fit(X_train, y_train)
+
+        print(f"{name} took {time.time() - start} to fit on {len(X_train)} samples")
 
         fitted_model.evaluate(X_test, y_test)
 
+        start = time.time()
         predictions = fitted_model.predict(X_test)
+        # print("predictions", predictions)
+        # print("actual", y_test)
+        print(f"{name} took {time.time() - start} to predict on {len(X_test)} samples")
+
 
         if(EXPORT):
             now = datetime.now().strftime('%m-%d--%H-%M-%S')
 
-            predictions = pd.DataFrame(predictions, columns=['pred_x', 'pred_y', 'pred_z'], index=y_test.index)
+            if type(predictions) is pd.DataFrame:
+                predictions.rename(columns={
+                    'x': 'pred_x',
+                    'y': 'pred_y',
+                    'z': 'pred_z',
+                }, inplace=True)
+                predictions.index = y_test.index
+            else:
+                predictions = pd.DataFrame(predictions, columns=['pred_x', 'pred_y', 'pred_z'], index=y_test.index)
 
             export = pd.concat([y_test, predictions], axis=1)
             export = unscale_xyz(export)
 
-            export.to_csv(f"results/{name}-{now}.csv", index=False)
+            export.to_csv(f"results/{name}{NAME_ADDITION}-{now}{'-non-prod' if NON_PROD else ''}.csv", index=False)
 
         if(SAVE_MODEL):
             now = datetime.now().strftime('%m-%d--%H-%M-%S')
 
-            pickle.dump(fitted_model, open(f"sklearn_models/multilayer/{name}-{now}.pkl", 'wb'))
+            pickle.dump(fitted_model, open(f"sklearn_models/multilayer/{name}{NAME_ADDITION}-{now}.pkl", 'wb'))
         
 
         
@@ -422,3 +454,6 @@ def handle_pipeline(pipeline, name, X_train, X_test, y_train, y_test, search_gri
 
 if __name__ == '__main__':
     main()
+    winsound.Beep(500, 200)
+    winsound.Beep(500, 200)
+    winsound.Beep(500, 200)

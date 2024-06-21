@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 import math
 from datetime import datetime
 from scipy.stats import norm
+from scipy.optimize import least_squares
 
 
 RSSI_MIN = -100
@@ -358,7 +359,10 @@ def filter_tuple(tup, remove_value=None):
     """
     return tuple(x for x in tup if x is not remove_value)
 
-def triangulate(distances, ap_positions):
+def trilaterate(distances, ap_positions, scale = True):
+    if scale:
+        ap_positions = np.apply_along_axis(lambda x: x * [X_MAX, Y_MAX, Z_MAX], 1, ap_positions)
+
     pred_x = 0
     pred_y = 0
     pred_z = 0
@@ -378,7 +382,48 @@ def triangulate(distances, ap_positions):
 
         totalWeight += weight
     
-    trilateration = [pred_x / totalWeight, pred_y / totalWeight, pred_z / totalWeight]
+    if scale:
+        trilateration = [pred_x / totalWeight / X_MAX, pred_y / totalWeight / Y_MAX, pred_z / totalWeight / Z_MAX]
+    else:
+        trilateration = [pred_x / totalWeight, pred_y / totalWeight, pred_z / totalWeight]
+    return trilateration
+
+def residuals(pred_position, ap_positions, distances):
+    residuals = []
+    for ap_position, distance in zip(ap_positions, distances):
+        # Calculate the Euclidean distance between the predicted position and the access point position
+        predicted_distance = np.linalg.norm(pred_position - ap_position)
+        # Calculate the residual (difference between predicted distance and observed distance)
+        residuals.append(predicted_distance - distance)
+        # print(ap_position, pred_position, predicted_distance, distance)
+    # print(residuals)
+    return residuals
+
+def least_squares_trilaterate(distances, ap_positions, n_closest_points):
+    ap_positions = np.array(ap_positions)
+    distances = np.array(distances)
+    # Initial guess for the position is the centroid of the access points
+    sorted_indices = np.argsort(distances)
+    closest_indices = sorted_indices[:n_closest_points]
+    distances = distances[closest_indices]
+    ap_positions = ap_positions[closest_indices]
+
+    ap_positions = np.apply_along_axis(lambda x: x * [X_MAX, Y_MAX, Z_MAX], 1, ap_positions)
+
+    initial_guess = trilaterate(distances, ap_positions, scale=False)
+    
+    lower = [0,0,0]
+    upper = [X_MAX, Y_MAX, Z_MAX]
+
+    # Use least_squares to minimize the residuals
+    result = least_squares(residuals, initial_guess, args=(np.array(ap_positions), np.array(distances)), bounds=(lower, upper))
+    
+    if not result.success:
+        print("This shit is ass bro", result)
+
+    # Extract the best estimate of the position
+    trilateration = result.x
+    trilateration = [trilateration[0] / X_MAX, trilateration[1] / Y_MAX, trilateration[2] / Z_MAX]
     return trilateration
 
 def get_ap_locations_names(df):
