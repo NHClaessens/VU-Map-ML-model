@@ -68,7 +68,7 @@ class SplitPipeline(Pipeline):
             name, model = step
 
             input = split_data_parts(X, [self.inputs[index]])[0] if self.inputs[index] else X
-
+            print(index, name, 'trains on', input.columns)
             model.fit(input, targets[index])
 
             if index < len(self.steps) - 1:
@@ -80,6 +80,7 @@ class SplitPipeline(Pipeline):
                     X = model.transform(input, targets[index])
 
         input = split_data_parts(X, [self.inputs[-1]])[0] if self.inputs[-1] else X
+        print('final layer trains on', input.columns)
 
         self.steps[-1][1].fit(input, y)
         
@@ -225,9 +226,9 @@ def main():
 
     # The models should not get to take in location as training data
     # predict_location(X_train, X_test, y_train, y_test)
-    # distance_trilateration(X_train, X_test, y_train, y_test)
+    distance_trilateration(X_train, X_test, y_train, y_test)
     # distance_to_location(X_train, X_test, y_train, y_test)
-    distance_trilateration_obstacle(X_train, X_test, y_train, y_test)
+    # distance_trilateration_obstacle(X_train, X_test, y_train, y_test)
 
 
 def predict_location(X_train, X_test, y_train, y_test):
