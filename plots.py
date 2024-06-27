@@ -1,6 +1,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.linear_model import LinearRegression
+from scipy.interpolate import griddata
 
 # Load the data
 
@@ -26,26 +28,27 @@ predictions = {
     3: 'results/No extra data/Distance-to-location-06-21--11-10-53.csv',
     4: 'results/No extra data/Distance-to-trilateration-to-obstacle-06-21--14-51-59.csv'
 }
+titleSize = 30
+legendSize = 35
+axisSize = 30
 
 
 def main():
-    # for key, val in predictions.items():
-    #     data = pd.read_csv(val)
+    for key, val in predictions.items():
+        data = pd.read_csv(val)
 
-    #     # error_plots(data, key)
-    #     rssi_variance(data, key)
+        # error_plots(data, key)
+        # coordinate_hist(data, key)
 
-
-    rssi_variance()
+    # rssi_vs_distance()
+    rssi_and_obstacle_vs_distance()
+    # rssi_variance()
 
 
 def error_plots(data, model_num):
     LOG = False
     LABELS = False
     AXIS = True
-    titleSize = 30
-    legendSize = 35
-    axisSize = 30
 
     # Calculate errors for each coordinate
     data['error_x'] = data['x'] - data['pred_x']
@@ -145,7 +148,329 @@ def rssi_variance():
     plt.tight_layout()
     plt.savefig('RSSI_variance.png', dpi=300)
 
+def coordinate_hist(data, model_num):
+    model1 = pd.read_csv(predictions[1])
+    model2 = pd.read_csv(predictions[2])
+    model3 = pd.read_csv(predictions[3])
+    model4 = pd.read_csv(predictions[4])
 
+    # Define function to save individual histogram
+    def save_histogram(data, column, colors, title, output_path, bins=50):
+        plt.figure(figsize=(20, 10))
+        plt.hist([data[column], data['pred_'+column]], bins=bins, alpha=1, color=['red', 'cyan'], edgecolor='black', linewidth=1.2, label=[f'Real {column.upper()}'])
+        
+        # plt.hist([data[column]], bins=bins, alpha=0.5, color='red', edgecolor='black', linewidth=1.2, label=[f'Real {column.upper()}'])
+        # plt.hist([model1['pred_'+column]], bins=bins, alpha=0.5, color='blue', edgecolor='black', linewidth=1.2, label=[f'Predicted {column.upper()} model 1'])
+        # plt.hist([model2['pred_'+column]], bins=bins, alpha=0.5, color='yellow', edgecolor='black', linewidth=1.2, label=[f'Predicted {column.upper()} model 2'])
+        # plt.hist([model3['pred_'+column]], bins=bins, alpha=0.5, color='green', edgecolor='black', linewidth=1.2, label=[f'Predicted {column.upper()} model 3'])
+        # plt.hist([model4['pred_'+column]], bins=bins, alpha=0.5, color='purple', edgecolor='black', linewidth=1.2, label=[f'Predicted {column.upper()} model 4'])
+        
+        
+        plt.xlabel(f'{column.upper()} values', fontsize=legendSize)
+        plt.ylabel('Frequency', fontsize=legendSize)
+        plt.tick_params(axis='both', which='major', labelsize=axisSize)
+        plt.legend(fontsize=legendSize)
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
+
+    # Define color schemes
+    colors = {
+        'x': ['red', 'cyan'], 
+        'y': ['green', 'magenta'], 
+        'z': ['blue', 'orange']
+    }
+    # colors = {
+    #     'x': 'red', 
+    #     'y': 'green', 
+    #     'z': 'blue'
+    # }
+
+    # Save histograms for x, y, and z values
+    save_histogram(data, 'x', colors['x'], f'Histogram of X values', f'results/No extra data/Model {model_num} hist_x.png', bins=70)
+    save_histogram(data, 'y', colors['y'], f'Histogram of Y values', f'results/No extra data/Model {model_num} hist_y.png', bins=50)
+    save_histogram(data, 'z', colors['z'], f'Histogram of Z values', f'results/No extra data/Model {model_num} hist_z.png', bins=70)
+    # save_histogram(data, 'x', colors['x'], f'Histogram of X values', f'results/No extra data/hist_x.png', bins=70)
+    # save_histogram(data, 'y', colors['y'], f'Histogram of Y values', f'results/No extra data/hist_y.png', bins=50)
+    # save_histogram(data, 'z', colors['z'], f'Histogram of Z values', f'results/No extra data/hist_z.png', bins=70)
+
+    # results/No extra data/Model {model_num} hist_x.png
+
+def rssi_vs_distance():
+    df1 = pd.read_csv('data/samples F5 everything.csv')
+    df2 = pd.read_csv('data/samples F5 everything.csv')
+
+    data = pd.concat([df1, df2])
+
+    # Extract the columns with RSSI values and corresponding distance columns
+    rssi_columns = [col for col in data.columns if col.startswith('NU-AP') and not col.endswith('_distance')]
+    distance_columns = [col for col in data.columns if col.endswith('_distance')]
+
+    # Initialize lists to hold all RSSI values and distances
+    all_rssi_values = []
+    all_distances = []
+
+    # Iterate over each RSSI column and corresponding distance column
+    for rssi_col, distance_col in zip(rssi_columns, distance_columns):
+        rssi_values = data[rssi_col].dropna()
+        distances = data[distance_col].dropna()
+        
+        # Filter out values where either RSSI or distance is 0
+        valid_indices = (rssi_values != 1)
+        all_rssi_values.extend(rssi_values[valid_indices].tolist())
+        all_distances.extend(distances[valid_indices].tolist())
+
+    # Create a scatter plot
+    plt.figure(figsize=(15, 10))
+    plt.scatter(all_distances, all_rssi_values, alpha=0.5)
+    plt.xlabel('Distance', fontsize=legendSize)
+    plt.ylabel('RSSI Value', fontsize=legendSize)
+    plt.tick_params(axis='both', which='major', labelsize=axisSize)
+    plt.grid(True)
+    plt.show()
+
+def rssi_and_obstacle_vs_distance():
+    df1 = pd.read_csv('data/samples F5 everything.csv')
+    df2 = pd.read_csv('data/samples F6 everything.csv')
+
+    df = pd.concat([df1, df2])
+
+    # Extract the columns with RSSI values, corresponding distance, and obstacle thickness columns
+    rssi_columns = [col for col in df.columns if col.startswith('NU-AP') and not col.endswith(('_distance', '_thickness'))]
+    distance_columns = [col for col in df.columns if col.endswith('_distance')]
+    thickness_columns = [col for col in df.columns if col.endswith('_obstacle_thickness')]
+
+    # Initialize lists to hold all RSSI values, distances, and thicknesses
+    all_rssi_values = []
+    all_distances = []
+    all_thicknesses = []
+
+    # Iterate over each RSSI column and corresponding distance and thickness columns
+    for rssi_col, distance_col, thickness_col in zip(rssi_columns, distance_columns, thickness_columns):
+        rssi_values = df[rssi_col].dropna()
+        distances = df[distance_col].dropna()
+        thicknesses = df[thickness_col].dropna()
+        
+        # Filter out values where either RSSI, distance, or thickness is 0
+        valid_indices = (rssi_values != 1)
+        all_rssi_values.extend(rssi_values[valid_indices].tolist())
+        all_distances.extend(distances[valid_indices].tolist())
+        all_thicknesses.extend(thicknesses[valid_indices].tolist())
+
+    # Create a DataFrame for the aggregated data
+    data = pd.DataFrame({
+        'RSSI': all_rssi_values,
+        'Distance': all_distances,
+        'Thickness': all_thicknesses
+    })
+
+    distance_binsize = 2
+    thickness_binsize = 0.5
+
+    # Define finer bins for distance and thickness
+    distance_bins = np.arange(0, max(all_distances) + distance_binsize, distance_binsize)
+    thickness_bins = np.arange(0, max(all_thicknesses) + thickness_binsize, thickness_binsize)
+
+    # Create a pivot table to calculate the average RSSI for each distance and thickness bin
+    pivot_table = data.pivot_table(values='RSSI', index=pd.cut(data['Thickness'], bins=thickness_bins),
+                                   columns=pd.cut(data['Distance'], bins=distance_bins), aggfunc='mean')
+
+    # Create a mesh grid for interpolation
+    distance_grid, thickness_grid = np.meshgrid(distance_bins, thickness_bins)
+    points = np.array([data['Distance'], data['Thickness']]).T
+    values = data['RSSI']
+
+    # Interpolate missing values using griddata
+    # interpolated_grid = griddata(points, values, (distance_grid, thickness_grid), method='linear')
+
+    # Plot the pivot table and interpolated grid
+    plt.figure(figsize=(12, 8))
+
+    plt.imshow(pivot_table, aspect='auto', cmap='viridis', origin='lower',
+               extent=[distance_bins[0], distance_bins[-1], thickness_bins[0], thickness_bins[-1]])
+    # plt.imshow(interpolated_grid, aspect='auto', alpha=0.5, cmap='viridis', origin='lower',
+    #            extent=[distance_bins[0], distance_bins[-1], thickness_bins[0], thickness_bins[-1]])
+    
+    # plt.imshow(interpolated_grid.T, aspect='auto', cmap='viridis', origin='lower',
+    #            extent=[distance_bins.min(), distance_bins.max(), thickness_bins.min(), thickness_bins.max()])
+    
+    plt.colorbar(label='Average RSSI')
+    plt.title('RSSI Value Heatmap with Interpolated Values')
+    plt.xlabel('Distance')
+    plt.ylabel('Obstacle Thickness')
+    plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # # Extract the columns with RSSI values, corresponding distance, and obstacle thickness columns
+    # rssi_columns = [col for col in df.columns if col.startswith('NU-AP') and not col.endswith(('_distance', '_thickness'))]
+    # distance_columns = [col for col in df.columns if col.endswith('_distance')]
+    # thickness_columns = [col for col in df.columns if col.endswith('_obstacle_thickness')]
+
+    # # Initialize lists to hold all RSSI values, distances, and thicknesses
+    # all_rssi_values = []
+    # all_distances = []
+    # all_thicknesses = []
+
+    # # Iterate over each RSSI column and corresponding distance and thickness columns
+    # for rssi_col, distance_col, thickness_col in zip(rssi_columns, distance_columns, thickness_columns):
+    #     rssi_values = df[rssi_col].dropna()
+    #     distances = df[distance_col].dropna()
+    #     thicknesses = df[thickness_col].dropna()
+        
+    #     # Filter out values where either RSSI, distance, or thickness is 0
+    #     valid_indices = (rssi_values != 0) & (distances != 0) & (thicknesses != 0)
+    #     all_rssi_values.extend(rssi_values[valid_indices].tolist())
+    #     all_distances.extend(distances[valid_indices].tolist())
+    #     all_thicknesses.extend(thicknesses[valid_indices].tolist())
+
+    # # Create a DataFrame for the aggregated data
+    # data = pd.DataFrame({
+    #     'RSSI': all_rssi_values,
+    #     'Distance': all_distances,
+    #     'Thickness': all_thicknesses
+    # })
+
+    # # Define bins for thickness
+    # thickness_bins = np.arange(0, max(all_thicknesses) + 1, 0.5)
+    # data['Thickness_Bin'] = pd.cut(data['Thickness'], bins=thickness_bins, right=False)
+
+    # # Plot RSSI vs Distance for each thickness bin with error boundaries
+    # plt.figure(figsize=(14, 8))  # Increase the figure size for better legend fitting
+    # colors = plt.cm.viridis(np.linspace(0, 1, len(thickness_bins)))
+
+    # for i, (name, group) in enumerate(data.groupby('Thickness_Bin')):
+    #     if i < 3:
+    #         continue
+    #     if not group.empty:
+    #         # Calculate mean, min, and max for each distance
+    #         mean_rssi = group.groupby('Distance')['RSSI'].mean()
+    #         min_rssi = group.groupby('Distance')['RSSI'].min()
+    #         max_rssi = group.groupby('Distance')['RSSI'].max()
+            
+    #         # Apply rolling mean for smoothing
+    #         mean_rssi_smooth = mean_rssi.rolling(window=5, min_periods=1).mean()
+    #         min_rssi_smooth = min_rssi.rolling(window=5, min_periods=1).mean()
+    #         max_rssi_smooth = max_rssi.rolling(window=5, min_periods=1).mean()
+            
+    #         # Plot line with min-max error boundaries
+    #         distances = mean_rssi.index
+    #         plt.plot(distances, mean_rssi_smooth, color=colors[i], label=f'Thickness {name}')
+    #         # plt.fill_between(distances, min_rssi_smooth, max_rssi_smooth, color=colors[i], alpha=0.2)
+
+    # plt.title('RSSI Value vs. Distance Grouped by Obstacle Thickness')
+    # plt.xlabel('Distance')
+    # plt.ylabel('RSSI Value')
+    # plt.legend(title='Obstacle Thickness (m)', bbox_to_anchor=(1.05, 1), loc='upper left')
+    # plt.grid(True)
+    # plt.subplots_adjust(right=0.75)  # Adjust subplot parameters to make room for the legend
+    # plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # print(f'Total items, {len(df)}')
+
+    # # Extract the columns with RSSI values, corresponding distance, and obstacle thickness columns
+    # rssi_columns = [col for col in df.columns if col.startswith('NU-AP') and not col.endswith(('_distance', '_thickness'))]
+    # distance_columns = [col for col in df.columns if col.endswith('_distance')]
+    # thickness_columns = [col for col in df.columns if col.endswith('_obstacle_thickness')]
+
+    # # Initialize lists to hold all RSSI values, distances, and thicknesses
+    # all_rssi_values = []
+    # all_distances = []
+    # all_thicknesses = []
+
+    # # Iterate over each RSSI column and corresponding distance and thickness columns
+    # for rssi_col, distance_col, thickness_col in zip(rssi_columns, distance_columns, thickness_columns):
+    #     rssi_values = df[rssi_col].dropna()
+    #     distances = df[distance_col].dropna()
+    #     thicknesses = df[thickness_col].dropna()
+        
+    #     # Filter out values where either RSSI, distance, or thickness is 0
+    #     valid_indices = (rssi_values != 1)
+    #     all_rssi_values.extend(rssi_values[valid_indices].tolist())
+    #     all_distances.extend(distances[valid_indices].tolist())
+    #     all_thicknesses.extend(thicknesses[valid_indices].tolist())
+
+    # # Create a DataFrame for the aggregated data
+    # data = pd.DataFrame({
+    #     'RSSI': all_rssi_values,
+    #     'Distance': all_distances,
+    #     'Thickness': all_thicknesses
+    # })
+
+    # # Define bins for thickness
+    # thickness_bins = np.arange(0, max(all_thicknesses) + 1, 0.5)
+    # data['Thickness_Bin'] = pd.cut(data['Thickness'], bins=thickness_bins, right=False)
+
+    # # Plot RSSI vs Distance for each thickness bin
+    # plt.figure(figsize=(14, 8))  # Increase the figure size for better legend fitting
+    # colors = plt.cm.viridis(np.linspace(0, 1, len(thickness_bins)))
+
+    # for i, (name, group) in enumerate(data.groupby('Thickness_Bin')):
+    #     print(f'Group {name} contains {len(group)} items')
+    #     if not group.empty:
+    #         plt.scatter(group['Distance'], group['RSSI'], color=colors[i], alpha=0.5, label=f'Thickness {name}')
+
+    # plt.title('RSSI Value vs. Distance Grouped by Obstacle Thickness')
+    # plt.xlabel('Distance')
+    # plt.ylabel('RSSI Value')
+    # plt.legend(title='Obstacle Thickness (m)', bbox_to_anchor=(1.05, 1), loc='upper left')
+    # plt.grid(True)
+    # plt.subplots_adjust(right=0.75)  # Adjust subplot parameters to make room for the legend
+    # plt.show()
 
 
 if __name__ == '__main__':
